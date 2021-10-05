@@ -6,6 +6,12 @@
 /*************************************************************************
  ************* C O N S T A N T S    A N D   T Y P E S  *******************
 **************************************************************************/
+typedef bit<16> ether_type_t;
+typedef bit<8> ip_protocol_t;
+
+const ether_type_t ETHERTYPE_IPV4 = 16w0x0800;
+const ip_protocol_t IP_PROTOCOLS_UDP = 0x11;
+const bit<16> UDP_ROCE_V2 = 4791;
 
 /*************************************************************************
  ***********************  H E A D E R S  *********************************
@@ -19,13 +25,6 @@ header ethernet_h {
     bit<48>   dst_addr;
     bit<48>   src_addr;
     bit<16>   ether_type;
-}
-
-header vlan_tag_h {
-    bit<3>   pcp;
-    bit<1>   cfi;
-    bit<12>  vid;
-    bit<16>  ether_type;
 }
 
 header ipv4_h {
@@ -43,6 +42,24 @@ header ipv4_h {
     bit<32>  dst_addr;
 }
 
+header udp_h {
+    bit<16> src_port;
+    bit<16> dst_port;
+    bit<16> udp_total_len;
+    bit<16> checksum;
+}
+
+header ib_bth_h {
+    bit<8>  opcode;
+    bit<8>  flags;  // 1 bit solicited event, 1 bit migreq, 2 bit padcount, 4 bit headerversion
+    bit<16> partition_key;
+    bit<8>  reserved;
+    bit<24> destination_qp;
+    bit<8>  ack;    // 1 bit ack and 7 bit reserved
+    bit<24> packet_seqnum;
+}
+
+
 /*************************************************************************
  **************  I N G R E S S   P R O C E S S I N G   *******************
  *************************************************************************/
@@ -50,7 +67,10 @@ header ipv4_h {
     /***********************  H E A D E R S  ************************/
 
 struct my_ingress_headers_t {
-    ethernet_h   ethernet;
+    ethernet_h      ethernet;
+    ipv4_h          ipv4;
+    udp_h           udp;
+    ib_bth_h        bth;
 }
 
     /******  G L O B A L   I N G R E S S   M E T A D A T A  *********/
@@ -75,6 +95,27 @@ parser IngressParser(packet_in        pkt,
 
     state parse_ethernet {
         pkt.extract(hdr.ethernet);
+        transition select(hdr.ethernet.ether_type) {
+            ETHERTYPE_IPV4 : parse_ipv4;
+        }
+    }
+
+    state parse_ipv4 {
+        pkt.extract(hdr.ipv4);
+        transition select(hdr.ipv4.protocol) {
+            IP_PROTOCOLS_UDP : parse_udp;
+        }
+    }
+
+    state parse_udp {
+        pkt.extract(hdr.udp);
+        transition select(hdr.udp.dst_port) {
+            UDP_ROCE_V2 : parse_bth;
+        }
+    }
+
+    state parse_bth {
+        pkt.extract(hdr.bth);
         transition accept;
     }
 }
