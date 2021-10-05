@@ -126,7 +126,7 @@ void build_params(struct rdma_conn_param *params)
   memset(params, 0, sizeof(*params));
 
   params->initiator_depth = params->responder_resources = 1;
-  // params->rnr_retry_count = 7; /* infinite retry */
+  params->rnr_retry_count = 7; /* infinite retry */
 }
 
 void build_qp_attr(struct ibv_qp_init_attr *qp_attr)
@@ -135,7 +135,10 @@ void build_qp_attr(struct ibv_qp_init_attr *qp_attr)
 
   qp_attr->send_cq = s_ctx->cq;
   qp_attr->recv_cq = s_ctx->cq;
-  qp_attr->qp_type = IBV_QPT_UC;
+  qp_attr->qp_type = IBV_QPT_RC;
+  // qp_attr->qp_type = IBV_QPT_UC;
+  // To use UC, we need to tweak code to not poll the CQ
+  // probably the use of RDMACM to manage the events is making it hard to use UC
 
   qp_attr->cap.max_send_wr = 10;
   qp_attr->cap.max_recv_wr = 10;
