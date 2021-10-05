@@ -63,6 +63,10 @@ header ib_bth_h {
 // TODO
 // }
 
+// header ib_reth_h {
+// TODO
+// }
+
 
 /*************************************************************************
  **************  I N G R E S S   P R O C E S S I N G   *******************
@@ -124,6 +128,10 @@ parser IngressParser(packet_in        pkt,
     }
 
     // state parse_aeth {
+    // TODO
+    // }
+
+    // state parse_reth {
     // TODO
     // }
 }
