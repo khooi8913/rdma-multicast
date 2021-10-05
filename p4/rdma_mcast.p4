@@ -59,11 +59,13 @@ header ib_bth_h {
     bit<24> packet_seqnum;
 }
 
-// header ib_aeth_h {
-// TODO
-// }
+header ib_reth_h {
+    bit<64> virtual_addr;
+    bit<32> remote_key;
+    bit<32> dma_length;
+}
 
-// header ib_reth_h {
+// header ib_aeth_h {
 // TODO
 // }
 
@@ -79,6 +81,7 @@ struct my_ingress_headers_t {
     ipv4_h          ipv4;
     udp_h           udp;
     ib_bth_h        bth;
+    ib_reth_h       reth;
 }
 
     /******  G L O B A L   I N G R E S S   M E T A D A T A  *********/
