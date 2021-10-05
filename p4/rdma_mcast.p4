@@ -59,6 +59,10 @@ header ib_bth_h {
     bit<24> packet_seqnum;
 }
 
+// header ib_aeth_h {
+// TODO
+// }
+
 
 /*************************************************************************
  **************  I N G R E S S   P R O C E S S I N G   *******************
@@ -118,6 +122,10 @@ parser IngressParser(packet_in        pkt,
         pkt.extract(hdr.bth);
         transition accept;
     }
+
+    // state parse_aeth {
+    // TODO
+    // }
 }
 
     /***************** M A T C H - A C T I O N  *********************/
