@@ -169,18 +169,22 @@ void destroy_connection(void *context)
 
 void * get_local_message_region(void *context)
 {
-  if (s_mode == M_WRITE)
+  if (s_mode == M_WRITE) {
+    // printf("my local memory region: %s\n", ((struct connection *)context)->rdma_remote_region);
     return ((struct connection *)context)->rdma_local_region;
-  else
+  } else {
     return ((struct connection *)context)->rdma_remote_region;
+  }    
 }
 
 char * get_peer_message_region(struct connection *conn)
 {
-  if (s_mode == M_WRITE)
+  if (s_mode == M_WRITE) {
+    // printf("peer's remote memory region: %s\n", conn->rdma_remote_region);
     return conn->rdma_remote_region;
-  else
+  } else {
     return conn->rdma_local_region;
+  }
 }
 
 void on_completion(struct ibv_wc *wc)
@@ -195,9 +199,11 @@ void on_completion(struct ibv_wc *wc)
 
     if (conn->recv_msg->type == MSG_MR) {
       memcpy(&conn->peer_mr, &conn->recv_msg->data.mr, sizeof(conn->peer_mr));
-
+      
+      printf("=== received peer's mr information ===\n");
       printf("on_completion, peer_mr lkey: %u\n", conn->peer_mr.lkey);
       printf("on_completion, peer_mr rkey: %u\n", conn->peer_mr.rkey);
+
       post_receives(conn); /* only rearm for MSG_MR */
 
       if (conn->send_state == SS_INIT) /* received peer's MR before sending ours, so send ours back */
@@ -212,6 +218,8 @@ void on_completion(struct ibv_wc *wc)
   if (conn->send_state == SS_MR_SENT && conn->recv_state == RS_MR_RECV) {
     struct ibv_send_wr wr, *bad_wr = NULL;
     struct ibv_sge sge;
+
+    printf("=== start RDMA here ===\n");
 
     if (s_mode == M_WRITE)
       printf("received MSG_MR. writing message to remote memory...\n");
@@ -228,18 +236,21 @@ void on_completion(struct ibv_wc *wc)
     wr.wr.rdma.remote_addr = (uintptr_t)conn->peer_mr.addr;
     wr.wr.rdma.rkey = conn->peer_mr.rkey;
 
-    printf("on_completion, opcode: %u\n", wr.opcode);
-    printf("on_completion, remote_addr %lu\n", wr.wr.rdma.remote_addr);
-    printf("on_completion, remote rkey %u\n", wr.wr.rdma.rkey);
+    printf("on_completion, RDMA opcode: %u\n", wr.opcode);
+    printf("on_completion, RDMA to remote_addr %lu\n", wr.wr.rdma.remote_addr);
+    printf("on_completion, RDMA to remote rkey %u\n", wr.wr.rdma.rkey);
+    printf("on_completion, RDMA using QP number %u\n", conn->qp->qp_num);
+    // printf("on_completion, RDMA using QP number %u\n", conn->qp->srq);
 
     sge.addr = (uintptr_t)conn->rdma_local_region;
     sge.length = RDMA_BUFFER_SIZE;
     sge.lkey = conn->rdma_local_mr->lkey;
 
-    printf("on_completion, sge local_addr: %lu\n", sge.addr);
-    printf("on_completion, sge local lkey: %u\n", sge.lkey);
+    // printf("on_completion, sge local_addr: %lu\n", sge.addr);
+    // printf("on_completion, sge local lkey: %u\n", sge.lkey);
 
     TEST_NZ(ibv_post_send(conn->qp, &wr, &bad_wr));
+    printf("=== RDMA done ===\n");
 
     conn->send_msg->type = MSG_DONE;
     send_message(conn);
@@ -356,6 +367,7 @@ void send_message(struct connection *conn)
   sge.length = sizeof(struct message);
   sge.lkey = conn->send_mr->lkey;
   
+  printf("send_message opcode: %u\n", wr.opcode);
   printf("send_message send rkey: %u\n", conn->send_mr->rkey);
   printf("send_message send lkey: %u\n", conn->send_mr->lkey);
   printf("send_message recv rkey: %u\n", conn->recv_mr->rkey);
