@@ -50,12 +50,13 @@ header udp_h {
 }
 
 header ib_bth_h {
-    bit<8>  opcode;
+    bit<8>  opcode; // 00001010 RC RDMA Write, 00101010 UC RDMA Write, 00000100 RC SEND
     bit<8>  flags;  // 1 bit solicited event, 1 bit migreq, 2 bit padcount, 4 bit headerversion
     bit<16> partition_key;
-    bit<8>  reserved;
+    bit<8>  reserved0;
     bit<24> destination_qp;
-    bit<8>  ack;    // 1 bit ack and 7 bit reserved
+    bit<1>  ack_request; 
+    bit<7>  reserved1;   
     bit<24> packet_seqnum;
 }
 
@@ -64,11 +65,6 @@ header ib_reth_h {
     bit<32> remote_key;
     bit<32> dma_length;
 }
-
-// header ib_aeth_h {
-// TODO
-// }
-
 
 /*************************************************************************
  **************  I N G R E S S   P R O C E S S I N G   *******************
