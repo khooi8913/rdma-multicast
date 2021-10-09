@@ -131,6 +131,7 @@ parser IngressParser(packet_in        pkt,
     }
 
     state parse_reth {
+        pkt.extract(hdr.reth);
         transition accept;
     }
 
@@ -178,6 +179,11 @@ control IngressDeparser(packet_out pkt,
     /***********************  H E A D E R S  ************************/
 
 struct my_egress_headers_t {
+    ethernet_h      ethernet;
+    ipv4_h          ipv4;
+    udp_h           udp;
+    ib_bth_h        bth;
+    ib_reth_h       reth;
 }
 
     /********  G L O B A L   E G R E S S   M E T A D A T A  *********/
@@ -197,6 +203,41 @@ parser EgressParser(packet_in        pkt,
     /* This is a mandatory state, required by Tofino Architecture */
     state start {
         pkt.extract(eg_intr_md);
+        transition parse_ethernet;
+    }
+
+    state parse_ethernet {
+        pkt.extract(hdr.ethernet);
+        transition select(hdr.ethernet.ether_type) {
+            ETHERTYPE_IPV4 : parse_ipv4;
+        }
+    }
+
+    state parse_ipv4 {
+        pkt.extract(hdr.ipv4);
+        transition select(hdr.ipv4.protocol) {
+            IP_PROTOCOLS_UDP : parse_udp;
+        }
+    }
+
+    state parse_udp {
+        pkt.extract(hdr.udp);
+        transition select(hdr.udp.dst_port) {
+            UDP_ROCE_V2 : parse_bth;
+        }
+    }
+
+    state parse_bth {
+        pkt.extract(hdr.bth);
+        transition select(hdr.bth.opcode) {
+            00001010 : parse_reth;
+            00101010 : parse_reth;
+            default  : accept;
+        }
+    }
+
+    state parse_reth {
+        pkt.extract(hdr.reth);
         transition accept;
     }
 }
