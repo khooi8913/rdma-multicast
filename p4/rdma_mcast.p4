@@ -124,8 +124,8 @@ parser IngressParser(packet_in        pkt,
     state parse_bth {
         pkt.extract(hdr.bth);
         transition select(hdr.bth.opcode) {
-            00001010 : parse_reth;
-            00101010 : parse_reth;
+            0x00001010 : parse_reth;
+            0x00101010 : parse_reth;
             default  : accept;
         }
     }
@@ -230,8 +230,8 @@ parser EgressParser(packet_in        pkt,
     state parse_bth {
         pkt.extract(hdr.bth);
         transition select(hdr.bth.opcode) {
-            00001010 : parse_reth;
-            00101010 : parse_reth;
+            0x00001010 : parse_reth;
+            0x00101010 : parse_reth;
             default  : accept;
         }
     }
