@@ -123,6 +123,14 @@ parser IngressParser(packet_in        pkt,
 
     state parse_bth {
         pkt.extract(hdr.bth);
+        transition select(hdr.bth.opcode) {
+            00001010 : parse_reth;
+            00101010 : parse_reth;
+            default  : accept;
+        }
+    }
+
+    state parse_reth {
         transition accept;
     }
 
@@ -130,9 +138,6 @@ parser IngressParser(packet_in        pkt,
     // TODO
     // }
 
-    // state parse_reth {
-    // TODO
-    // }
 }
 
     /***************** M A T C H - A C T I O N  *********************/
