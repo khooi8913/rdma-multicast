@@ -153,7 +153,30 @@ control Ingress(
     inout ingress_intrinsic_metadata_for_deparser_t  ig_dprsr_md,
     inout ingress_intrinsic_metadata_for_tm_t        ig_tm_md)
 {
+
+    action multicast(MulticastGroupId_t mcast_grp) {
+        ig_tm_md.mcast_grp_a       = mcast_grp;
+        ig_tm_md.level2_exclusion_id = 0xFF;
+    }
+
+    action l3_forward(PortId_t port) {
+        ig_tm_md.ucast_egress_port=port;
+    }
+
+    table ip_forward {
+        key = {
+            hdr.ipv4.dst_addr : exact;
+        }
+        actions = {
+            l3_forward;
+            multicast;
+            NoAction;
+        }
+        size = 512;
+    }
+
     apply {
+        ip_forward.apply();
     }
 }
 
@@ -254,7 +277,44 @@ control Egress(
     inout egress_intrinsic_metadata_for_deparser_t     eg_dprsr_md,
     inout egress_intrinsic_metadata_for_output_port_t  eg_oport_md)
 {
+
+    action translate(bit<24> qp, bit<64> virtual_addr, bit<32> remote_key) {
+        hdr.bth.destination_qp = qp;
+        hdr.reth.remote_key = remote_key;
+        hdr.reth.virtual_addr = virtual_addr;
+    }
+
+    table rdma_translate {
+        key = {
+            hdr.ipv4.dst_addr       : exact;
+            hdr.reth.isValid()      : exact;
+            hdr.bth.destination_qp  : exact;
+        }
+        actions = {
+            translate;
+            NoAction;
+        }
+        size = 512;
+    }
+
+    action swap(bit<32> dst_addr) {
+        hdr.ipv4.dst_addr = dst_addr;
+    }
+
+    table swap_dst_ip {
+        key = {
+           eg_intr_md.egress_port : exact; 
+        }
+        actions = {
+            swap;
+        }
+        size = 512;
+    }
+
     apply {
+        if(rdma_translate.apply().hit) {
+            swap_dst_ip.apply();
+        }
     }
 }
 
