@@ -56,19 +56,20 @@ int main(int argc, char **argv)
 int on_connect_request(struct rdma_cm_id *id)
 {
   struct rdma_conn_param cm_params;
+  
 
-  printf("received connection request.\n");
-  build_connection(id);
-  build_params(&cm_params);
-  sprintf(get_local_message_region(id->context), "message from passive/server side with pid %d", getpid());
-  TEST_NZ(rdma_accept(id, &cm_params));
-  // rdma_accept(id, &cm_params);
-
+  printf("[Event] Received connection request.\n\n");
+  build_connection(id); // build context, qp attributes, allocate qp, register memory, post receives
+  build_params(&cm_params); // build parameters
+  sprintf(get_local_message_region(id->context), "server%dfuuuuuuuuuuuuuuuk", getpid());
+  TEST_NZ(rdma_accept(id, &cm_params)); // rdma accept
+  
   return 0;
 }
 
 int on_connection(struct rdma_cm_id *id)
 {
+  printf("[Event] On connection.\n\n");
   on_connect(id->context);
 
   return 0;
@@ -76,7 +77,7 @@ int on_connection(struct rdma_cm_id *id)
 
 int on_disconnect(struct rdma_cm_id *id)
 {
-  printf("peer disconnected.\n");
+  printf("[Event] Disconnection.\n\n");
 
   destroy_connection(id->context);
   return 0;
@@ -85,15 +86,26 @@ int on_disconnect(struct rdma_cm_id *id)
 int on_event(struct rdma_cm_event *event)
 {
   int r = 0;
-
-  if (event->event == RDMA_CM_EVENT_CONNECT_REQUEST)
+  printf("[Main] Event occurs (%d) !!\n", event->event);
+  if (event->event == RDMA_CM_EVENT_CONNECT_REQUEST){
     r = on_connect_request(event->id);
-  else if (event->event == RDMA_CM_EVENT_ESTABLISHED)
+    printf("**********Event: RDMA_CM_EVENT_CONNECT_REQUEST\n");
+    getchar();
+    }
+  else if (event->event == RDMA_CM_EVENT_ESTABLISHED){
     r = on_connection(event->id);
-  else if (event->event == RDMA_CM_EVENT_DISCONNECTED)
+    printf("**********Event: RDMA_CM_EVENT_ESTABLISHED\n");
+    getchar();
+    }
+  else if (event->event == RDMA_CM_EVENT_DISCONNECTED){
     r = on_disconnect(event->id);
-  else
-    die("on_event: unknown event.");
+    printf("**********Event: RDMA_CM_EVENT_DISCONNECTED\n");
+    getchar();
+    }
+  else{
+    die("[Error] on_event: unknown event.");
+    getchar();
+    }
 
   return r;
 }
