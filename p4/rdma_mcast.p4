@@ -50,12 +50,13 @@ header udp_h {
 }
 
 header ib_bth_h {
-    bit<8>  opcode;
+    bit<8>  opcode; // 00001010 RC RDMA Write, 00101010 UC RDMA Write, 00000100 RC SEND
     bit<8>  flags;  // 1 bit solicited event, 1 bit migreq, 2 bit padcount, 4 bit headerversion
     bit<16> partition_key;
-    bit<8>  reserved;
+    bit<8>  reserved0;
     bit<24> destination_qp;
-    bit<8>  ack;    // 1 bit ack and 7 bit reserved
+    bit<1>  ack_request; 
+    bit<7>  reserved1;   
     bit<24> packet_seqnum;
 }
 
@@ -64,11 +65,6 @@ header ib_reth_h {
     bit<32> remote_key;
     bit<32> dma_length;
 }
-
-// header ib_aeth_h {
-// TODO
-// }
-
 
 /*************************************************************************
  **************  I N G R E S S   P R O C E S S I N G   *******************
@@ -127,6 +123,15 @@ parser IngressParser(packet_in        pkt,
 
     state parse_bth {
         pkt.extract(hdr.bth);
+        transition select(hdr.bth.opcode) {
+            0x00001010 : parse_reth;
+            0x00101010 : parse_reth;
+            default  : accept;
+        }
+    }
+
+    state parse_reth {
+        pkt.extract(hdr.reth);
         transition accept;
     }
 
@@ -134,9 +139,6 @@ parser IngressParser(packet_in        pkt,
     // TODO
     // }
 
-    // state parse_reth {
-    // TODO
-    // }
 }
 
     /***************** M A T C H - A C T I O N  *********************/
@@ -151,7 +153,30 @@ control Ingress(
     inout ingress_intrinsic_metadata_for_deparser_t  ig_dprsr_md,
     inout ingress_intrinsic_metadata_for_tm_t        ig_tm_md)
 {
+
+    action multicast(MulticastGroupId_t mcast_grp) {
+        ig_tm_md.mcast_grp_a       = mcast_grp;
+        ig_tm_md.level2_exclusion_id = 0xFF;
+    }
+
+    action l3_forward(PortId_t port) {
+        ig_tm_md.ucast_egress_port=port;
+    }
+
+    table ip_forward {
+        key = {
+            hdr.ipv4.dst_addr : exact;
+        }
+        actions = {
+            l3_forward;
+            multicast;
+            NoAction;
+        }
+        size = 512;
+    }
+
     apply {
+        ip_forward.apply();
     }
 }
 
@@ -177,6 +202,11 @@ control IngressDeparser(packet_out pkt,
     /***********************  H E A D E R S  ************************/
 
 struct my_egress_headers_t {
+    ethernet_h      ethernet;
+    ipv4_h          ipv4;
+    udp_h           udp;
+    ib_bth_h        bth;
+    ib_reth_h       reth;
 }
 
     /********  G L O B A L   E G R E S S   M E T A D A T A  *********/
@@ -196,6 +226,41 @@ parser EgressParser(packet_in        pkt,
     /* This is a mandatory state, required by Tofino Architecture */
     state start {
         pkt.extract(eg_intr_md);
+        transition parse_ethernet;
+    }
+
+    state parse_ethernet {
+        pkt.extract(hdr.ethernet);
+        transition select(hdr.ethernet.ether_type) {
+            ETHERTYPE_IPV4 : parse_ipv4;
+        }
+    }
+
+    state parse_ipv4 {
+        pkt.extract(hdr.ipv4);
+        transition select(hdr.ipv4.protocol) {
+            IP_PROTOCOLS_UDP : parse_udp;
+        }
+    }
+
+    state parse_udp {
+        pkt.extract(hdr.udp);
+        transition select(hdr.udp.dst_port) {
+            UDP_ROCE_V2 : parse_bth;
+        }
+    }
+
+    state parse_bth {
+        pkt.extract(hdr.bth);
+        transition select(hdr.bth.opcode) {
+            0x00001010 : parse_reth;
+            0x00101010 : parse_reth;
+            default  : accept;
+        }
+    }
+
+    state parse_reth {
+        pkt.extract(hdr.reth);
         transition accept;
     }
 }
@@ -212,7 +277,44 @@ control Egress(
     inout egress_intrinsic_metadata_for_deparser_t     eg_dprsr_md,
     inout egress_intrinsic_metadata_for_output_port_t  eg_oport_md)
 {
+
+    action translate(bit<24> qp, bit<64> virtual_addr, bit<32> remote_key) {
+        hdr.bth.destination_qp = qp;
+        hdr.reth.remote_key = remote_key;
+        hdr.reth.virtual_addr = virtual_addr;
+    }
+
+    table rdma_translate {
+        key = {
+            hdr.ipv4.dst_addr       : exact;
+            hdr.reth.isValid()      : exact;
+            hdr.bth.destination_qp  : exact;
+        }
+        actions = {
+            translate;
+            NoAction;
+        }
+        size = 512;
+    }
+
+    action swap(bit<32> dst_addr) {
+        hdr.ipv4.dst_addr = dst_addr;
+    }
+
+    table swap_dst_ip {
+        key = {
+           eg_intr_md.egress_port : exact; 
+        }
+        actions = {
+            swap;
+        }
+        size = 512;
+    }
+
     apply {
+        if(rdma_translate.apply().hit) {
+            swap_dst_ip.apply();
+        }
     }
 }
 
