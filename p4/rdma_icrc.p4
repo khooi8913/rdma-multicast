@@ -74,6 +74,7 @@ header icrc_h {
     bit<32> icrc;
 }
 
+
 /*************************************************************************
  **************  I N G R E S S   P R O C E S S I N G   *******************
  *************************************************************************/
@@ -86,11 +87,14 @@ struct my_ingress_headers_t {
     udp_h           udp;
     ib_bth_h        bth;
     ib_reth_h       reth;
+    data_h          data;
+    icrc_h          icrc;
 }
 
     /******  G L O B A L   I N G R E S S   M E T A D A T A  *********/
 
 struct my_ingress_metadata_t {
+    bit<10> mirror_session;
 }
 
     /***********************  P A R S E R  **************************/
@@ -102,9 +106,12 @@ parser IngressParser(packet_in        pkt,
     out ingress_intrinsic_metadata_t  ig_intr_md)
 {
     /* This is a mandatory state, required by Tofino Architecture */
-     state start {
+    state start {
         pkt.extract(ig_intr_md);
         pkt.advance(PORT_METADATA_SIZE);
+
+        meta.mirror_session = 0;
+
         transition parse_ethernet;
     }
 
@@ -135,21 +142,25 @@ parser IngressParser(packet_in        pkt,
     state parse_bth {
         pkt.extract(hdr.bth);
         transition select(hdr.bth.opcode) {
-            0x00001010 : parse_reth;
-            0x00101010 : parse_reth;
+            0x0a : parse_reth;
             default  : accept;
         }
     }
 
     state parse_reth {
         pkt.extract(hdr.reth);
-        transition accept;
+        transition parse_data;
     }
 
-    // state parse_aeth {
-    // TODO
-    // }
+    state parse_data {
+        pkt.extract(hdr.data);
+        transition parse_icrc;
+    }
 
+    state parse_icrc {
+        pkt.extract(hdr.icrc);
+        transition accept;
+    }
 }
 
     /***************** M A T C H - A C T I O N  *********************/
@@ -165,16 +176,73 @@ control Ingress(
     inout ingress_intrinsic_metadata_for_tm_t        ig_tm_md)
 {
 
-    
+    action mirror() {
+        ig_dprsr_md.mirror_type = 1;
+        meta.mirror_session = 10w333;
+    }
+
+    action multicast(MulticastGroupId_t mcast_grp) {
+        ig_tm_md.mcast_grp_a       = mcast_grp;
+        ig_tm_md.level2_exclusion_id = 0xFF;
+
+        mirror();
+    }
+
+    table multicast_forward {
+        key = {
+            hdr.ipv4.dst_addr : exact;
+            hdr.udp.dst_port : exact;
+        }
+        actions = {
+            multicast;
+            NoAction;
+        }
+        const entries = {
+            (0xe001ffff, 4791) : multicast(224);    // 224.1.255.255
+        }
+        size = 512;
+    }
+
+    action l2_forward(PortId_t port) {
+        ig_tm_md.ucast_egress_port=port;
+
+        mirror();
+    }
+
+    table l2_forwarding {
+        key = {
+            hdr.ethernet.dst_addr : exact;
+        }
+        actions = {
+            l2_forward;
+            NoAction;
+        }
+        const entries = {
+            0xb8cef6046bd0 : l2_forward(132);   // lumos - ens2f0 b8:ce:f6:04:6b:d0
+            0xb8cef6046bd1 : l2_forward(133);   // lumos - ens2f1 b8:ce:f6:04:6b:d1
+            0xb8cef6046c04 : l2_forward(134);   // patronus - ens2f0 b8:ce:f6:04:6c:04
+            0xb8cef6046c05 : l2_forward(135);   // patronus - ens2f1 b8:ce:f6:04:6c:05
+        }
+    }
 
     apply {
-        if(ig_intr_md.ingress_port == 132) {
-            ig_tm_md.ucast_egress_port = 134;
-        } else if (ig_intr_md.ingress_port == 134) {
-            ig_tm_md.ucast_egress_port = 132;
-        } else {
-            ig_dprsr_md.drop_ctl = 0x0;
+        if(!multicast_forward.apply().hit) {
+            l2_forwarding.apply();
         }
+
+        // if(ig_intr_md.ingress_port == 132) {
+        //     ig_dprsr_md.mirror_type = 1;
+        //     meta.mirror_session = 10w333;
+        //     ig_tm_md.ucast_egress_port = 134;
+        // } else if (ig_intr_md.ingress_port == 134) {
+        //     ig_dprsr_md.mirror_type = 1;
+        //     meta.mirror_session = 10w333;
+        //     ig_tm_md.ucast_egress_port = 132;
+        // } else {
+        //     ig_dprsr_md.drop_ctl = 0x0;
+        // }   
+
+        // ig_tm_md.bypass_egress = 1;
     }
 }
 
@@ -187,7 +255,13 @@ control IngressDeparser(packet_out pkt,
     /* Intrinsic */
     in    ingress_intrinsic_metadata_for_deparser_t  ig_dprsr_md)
 {
+    Mirror() mirror;
+
     apply {
+        if(ig_dprsr_md.mirror_type == 1) {      // different mirror types can define different sets of headers
+            mirror.emit(meta.mirror_session);   // which session?
+        }
+
         pkt.emit(hdr);
     }
 }
@@ -212,6 +286,7 @@ struct my_egress_headers_t {
     /********  G L O B A L   E G R E S S   M E T A D A T A  *********/
 
 struct my_egress_metadata_t {
+    bit<10> mirror_session;
 }
 
     /***********************  P A R S E R  **************************/
@@ -257,7 +332,6 @@ parser EgressParser(packet_in        pkt,
         pkt.extract(hdr.bth);
         transition select(hdr.bth.opcode) {
             0x0a : parse_reth;
-            // 8w00101010 : parse_reth;
             default  : accept;
         }
     }
@@ -290,7 +364,7 @@ control Egress(
     inout egress_intrinsic_metadata_for_deparser_t     eg_dprsr_md,
     inout egress_intrinsic_metadata_for_output_port_t  eg_oport_md)
 {
-    
+
     bit<32> tmp1 = 0;
     bit<32> tmp2 = 0;
     bit<32> tmp3 = 0;
@@ -365,14 +439,82 @@ control Egress(
 	    hdr.icrc.icrc = tmp1 | tmp3;
     }
 
+    action translate(bit<24> qp, bit<24> seq, bit<64> virtual_addr, bit<32> remote_key) {
+        hdr.bth.destination_qp = qp;
+        hdr.bth.packet_seqnum = seq;
+        hdr.reth.remote_key = remote_key;
+        hdr.reth.virtual_addr = virtual_addr;
+    }
+
+    table rdma_translate {
+        key = {
+            eg_intr_md.egress_port : exact;
+            hdr.ipv4.dst_addr   : exact;
+        }
+        actions = {
+            translate;
+            NoAction;
+        }
+        size = 512;
+    }
+
+    action swap(bit<48> dst_mac, bit<32> dst_ip) {
+        hdr.ethernet.dst_addr = dst_mac;
+        hdr.ipv4.dst_addr = dst_ip;
+    }
+
+    table swap_dst_mac_ip {
+        key = {
+           eg_intr_md.egress_port : exact; 
+        }
+        actions = {
+            swap;
+            NoAction;
+        }
+        const entries = {
+            132 : swap(0xb8cef6046bd0, 0x0a0a0a01); // 132 - 10.10.10.1
+            133 : swap(0xb8cef6046bd1, 0x0a0a0a02); // 133 - 10.10.10.2
+            134 : swap(0xb8cef6046c04, 0x0a0a0a03); // 133 - 10.10.10.3
+            135 : swap(0xb8cef6204c05, 0x0a0a0a04); // 134 - 10.10.10.4
+        }
+        size = 512;
+    }
+
+    action mirror() {
+        eg_dprsr_md.mirror_type = 1;
+        meta.mirror_session = 10w333;
+    }
+    
     apply {
-        if(hdr.reth.isValid()) {
+        if(rdma_translate.apply().hit) {
+            swap_dst_mac_ip.apply();
             calculate_crc();
             swap_crc();
             swap2_crc();
             swap3_crc();
             swap4_crc();
         }
+
+        if(hdr.udp.dst_port == 4791) {
+            mirror();
+        }
+
+        // if(hdr.reth.isValid()) {
+        //     calculate_crc();
+        //     swap_crc();
+        //     swap2_crc();
+        //     swap3_crc();
+        //     swap4_crc();
+        // }
+
+        // if(eg_intr_md.egress_port == 132) {
+        //     eg_dprsr_md.mirror_type = 1;
+        //     meta.mirror_session = 10w333;
+        // } else if (eg_intr_md.egress_port == 134) {
+        //     eg_dprsr_md.mirror_type = 1;
+        //     meta.mirror_session = 10w333;
+        // }
+        
     }
 }
 
@@ -385,7 +527,12 @@ control EgressDeparser(packet_out pkt,
     /* Intrinsic */
     in    egress_intrinsic_metadata_for_deparser_t  eg_dprsr_md)
 {
+    Mirror() mirror;
+
     apply {
+        if(eg_dprsr_md.mirror_type == 1) {
+            mirror.emit(meta.mirror_session);
+        }
         pkt.emit(hdr);
     }
 }

@@ -1,0 +1,7 @@
+ucli
+pm
+port-add 9/-0 25G NONE
+port-add 31/- 25G NONE
+an-set -/- 2
+port-enb -/-
+show
