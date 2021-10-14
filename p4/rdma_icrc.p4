@@ -198,7 +198,7 @@ control Ingress(
             NoAction;
         }
         const entries = {
-            (0xe001ffff, 4791) : multicast(224);    // 224.1.255.255
+            (0x0a0a0aff, 4791) : multicast(224);    // 10.10.10.255
         }
         size = 512;
     }
@@ -287,6 +287,7 @@ struct my_egress_headers_t {
 
 struct my_egress_metadata_t {
     bit<10> mirror_session;
+    bool  checksum_upd_ipv4;
 }
 
     /***********************  P A R S E R  **************************/
@@ -461,6 +462,7 @@ control Egress(
     action swap(bit<48> dst_mac, bit<32> dst_ip) {
         hdr.ethernet.dst_addr = dst_mac;
         hdr.ipv4.dst_addr = dst_ip;
+        meta.checksum_upd_ipv4 = true;
     }
 
     table swap_dst_mac_ip {
@@ -472,10 +474,10 @@ control Egress(
             NoAction;
         }
         const entries = {
-            132 : swap(0xb8cef6046bd0, 0x0a0a0a01); // 132 - 10.10.10.1
-            133 : swap(0xb8cef6046bd1, 0x0a0a0a02); // 133 - 10.10.10.2
-            134 : swap(0xb8cef6046c04, 0x0a0a0a03); // 133 - 10.10.10.3
-            135 : swap(0xb8cef6204c05, 0x0a0a0a04); // 134 - 10.10.10.4
+            132 : swap(0xb8cef6046bd0, 0x0a0a0a01); // 132 - 10.10.10.1 - b8:ce:f6:04:6b:d0
+            133 : swap(0xb8cef6046bd1, 0x0a0a0a02); // 133 - 10.10.10.2 - b8:ce:f6:04:6b:d1
+            134 : swap(0xb8cef6046c04, 0x0a0a0a03); // 134 - 10.10.10.3 - b8:ce:f6:04:6c:04
+            135 : swap(0xb8cef6046c05, 0x0a0a0a04); // 135 - 10.10.10.4 - b8:ce:f6:04:6c:05
         }
         size = 512;
     }
@@ -486,18 +488,26 @@ control Egress(
     }
     
     apply {
-        if(rdma_translate.apply().hit) {
-            swap_dst_mac_ip.apply();
-            calculate_crc();
-            swap_crc();
-            swap2_crc();
-            swap3_crc();
-            swap4_crc();
-        }
-
-        if(hdr.udp.dst_port == 4791) {
+        if(hdr.udp.dst_port == 4791 && eg_intr_md.egress_port != 60) {
             mirror();
         }
+
+        if(hdr.reth.isValid() && eg_intr_md.egress_port != 60) {
+            rdma_translate.apply();
+            swap_dst_mac_ip.apply();
+        }
+        
+        @stage(4){
+            if(hdr.reth.isValid() && eg_intr_md.egress_port != 60) {
+                calculate_crc();
+                swap_crc();
+                swap2_crc();
+                swap3_crc();
+                swap4_crc();
+            }
+        }
+
+        
 
         // if(hdr.reth.isValid()) {
         //     calculate_crc();
@@ -528,8 +538,24 @@ control EgressDeparser(packet_out pkt,
     in    egress_intrinsic_metadata_for_deparser_t  eg_dprsr_md)
 {
     Mirror() mirror;
+    Checksum() ipv4_checksum;
 
     apply {
+        if (meta.checksum_upd_ipv4) {
+            hdr.ipv4.hdr_checksum = ipv4_checksum.update(
+                {hdr.ipv4.version,
+                 hdr.ipv4.ihl,
+                 hdr.ipv4.diffserv,
+                 hdr.ipv4.total_len,
+                 hdr.ipv4.identification,
+                 hdr.ipv4.flags,
+                 hdr.ipv4.frag_offset,
+                 hdr.ipv4.ttl,
+                 hdr.ipv4.protocol,
+                 hdr.ipv4.src_addr,
+                 hdr.ipv4.dst_addr});
+        }
+
         if(eg_dprsr_md.mirror_type == 1) {
             mirror.emit(meta.mirror_session);
         }
