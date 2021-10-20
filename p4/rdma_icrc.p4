@@ -176,6 +176,22 @@ control Ingress(
     inout ingress_intrinsic_metadata_for_tm_t        ig_tm_md)
 {
 
+    Register<bit<32>, _>(1) psn_offset;
+    RegisterAction<bit<32>, _, bit<32>> (psn_offset) psn_offset_update = {
+        void apply(inout bit<32> val, out bit<32> rv) {
+            rv = val;
+            val = val + 1;
+        }
+    };
+
+    Register<bit<32>, _>(1) vaddr_offset;
+    RegisterAction<bit<32>, _, bit<32>> (vaddr_offset) vaddr_offset_update = {
+        void apply(inout bit<32> val, out bit<32> rv) {
+            rv = val;
+            val = val + hdr.reth.dma_length;
+        }
+    };
+
     action mirror() {
         ig_dprsr_md.mirror_type = 1;
         meta.mirror_session = 10w333;
