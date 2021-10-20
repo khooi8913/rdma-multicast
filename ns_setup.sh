@@ -1,3 +1,5 @@
+#! /bin/bash
+
 # lumos
 sudo ip netns add ns1
 sudo ip link set ens2f0 netns ns1
