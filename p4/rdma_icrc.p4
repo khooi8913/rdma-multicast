@@ -6,6 +6,9 @@
 /*************************************************************************
  ************* C O N S T A N T S    A N D   T Y P E S  *******************
 **************************************************************************/
+typedef bit<8> header_type_t;
+
+
 typedef bit<16> ether_type_t;
 typedef bit<8> ip_protocol_t;
 
@@ -19,6 +22,14 @@ const bit<16> UDP_ROCE_V2 = 4791;
 
 /*  Define all the headers the program will recognize             */
 /*  The actual sets of headers processed by each gress can differ */
+header bridge_h {
+    header_type_t header_type;
+}
+
+header offset_h {
+    bit<32> psn;
+    bit<32> vaddr;
+}
 
 /* Standard ethernet header */
 header ethernet_h {
@@ -61,7 +72,9 @@ header ib_bth_h {
 }
 
 header ib_reth_h {
-    bit<64> virtual_addr;
+    // bit<64> virtual_addr;
+    bit<32> virtual_addr_0;
+    bit<32> virtual_addr_1;
     bit<32> remote_key;
     bit<32> dma_length;
 }
@@ -82,6 +95,8 @@ header icrc_h {
     /***********************  H E A D E R S  ************************/
 
 struct my_ingress_headers_t {
+    bridge_h        bridge;
+    offset_h        offset;
     ethernet_h      ethernet;
     ipv4_h          ipv4;
     udp_h           udp;
@@ -175,6 +190,8 @@ control Ingress(
     inout ingress_intrinsic_metadata_for_deparser_t  ig_dprsr_md,
     inout ingress_intrinsic_metadata_for_tm_t        ig_tm_md)
 {
+    bit<32> poff = 0;
+    bit<32> voff = 0;
 
     Register<bit<32>, _>(1) psn_offset;
     RegisterAction<bit<32>, _, bit<32>> (psn_offset) psn_offset_update = {
@@ -239,11 +256,25 @@ control Ingress(
             0xb8cef6046c04 : l2_forward(134);   // patronus - ens2f0 b8:ce:f6:04:6c:04
             0xb8cef6046c05 : l2_forward(135);   // patronus - ens2f1 b8:ce:f6:04:6c:05
         }
+        size = 512;
     }
 
     apply {
-        if(!multicast_forward.apply().hit) {
+        if(multicast_forward.apply().hit) {
+            poff = psn_offset_update.execute(0);
+            voff = vaddr_offset_update.execute(0);
+            hdr.bridge.setValid();
+            hdr.bridge.header_type = 0xA;
+        } else {
             l2_forwarding.apply();
+            hdr.bridge.setValid();
+            hdr.bridge.header_type = 0x0;
+        }
+
+        if(hdr.bridge.header_type == 0xA) {
+            hdr.offset.setValid();
+            hdr.offset.psn = poff;
+            hdr.offset.vaddr = voff;
         }
 
         // if(ig_intr_md.ingress_port == 132) {
@@ -290,6 +321,8 @@ control IngressDeparser(packet_out pkt,
     /***********************  H E A D E R S  ************************/
 
 struct my_egress_headers_t {
+    bridge_h        bridge;
+    offset_h        offset;
     ethernet_h      ethernet;
     ipv4_h          ipv4;
     udp_h           udp;
@@ -316,8 +349,24 @@ parser EgressParser(packet_in        pkt,
     out egress_intrinsic_metadata_t  eg_intr_md)
 {
     /* This is a mandatory state, required by Tofino Architecture */
+
     state start {
+        meta.mirror_session = 0;
+        meta.checksum_upd_ipv4 = false;
+
         pkt.extract(eg_intr_md);
+        pkt.extract(hdr.bridge);
+
+        transition select(hdr.bridge.header_type) {
+            0xA : parse_offset;
+            default : parse_ethernet;
+        }
+
+        // transition parse_ethernet;
+    }
+
+    state parse_offset {
+        pkt.extract(hdr.offset);
         transition parse_ethernet;
     }
 
@@ -388,6 +437,13 @@ control Egress(
     bit<32> tmp4 = 0; 
     bit<64> tmp5 = 0;
 
+    bit<32> poff = 0;
+    bit<32> voff = 0;
+
+    bit<32> p = 0;
+    bit<32> v0 = 0;
+    bit<32> v = 0;
+
     CRCPolynomial<bit<32>>(
         coeff = 0x04C11DB7,
         reversed = true,
@@ -426,7 +482,9 @@ control Egress(
         hdr.bth.ack_request,
         hdr.bth.reserved1,
         hdr.bth.packet_seqnum,
-        hdr.reth.virtual_addr,
+        // hdr.reth.virtual_addr,
+        hdr.reth.virtual_addr_0,
+        hdr.reth.virtual_addr_1,
         hdr.reth.remote_key,
         hdr.reth.dma_length,
         hdr.data.data
@@ -456,11 +514,20 @@ control Egress(
 	    hdr.icrc.icrc = tmp1 | tmp3;
     }
 
-    action translate(bit<24> qp, bit<24> seq, bit<64> virtual_addr, bit<32> remote_key) {
+    action translate(bit<24> qp, bit<32> seq, bit<64> virtual_addr, bit<32> remote_key) {
         hdr.bth.destination_qp = qp;
-        hdr.bth.packet_seqnum = seq;
+        
+        // hdr.bth.packet_seqnum = seq;
+        // p = (bit<32>) seq;
+        p = seq;
+
         hdr.reth.remote_key = remote_key;
-        hdr.reth.virtual_addr = virtual_addr;
+        // hdr.reth.virtual_addr_0 = virtual_addr[63:32];
+        // hdr.reth.virtual_addr_1 = virtual_addr[31:0];
+
+        // hdr.reth.virtual_addr = virtual_addr;
+        v0 = virtual_addr[63:32];
+        v = virtual_addr[31:0];
     }
 
     table rdma_translate {
@@ -503,28 +570,81 @@ control Egress(
         meta.mirror_session = 10w333;
     }
     
+    
+    
+    // action add_offset() {
+    //     // p = hdr.bth.packet_seqnum + hdr.offset.psn;
+    //     // v = hdr.reth.virtual_addr + hdr.offset.vaddr;
+    //     p = p + hdr.offset.psn;
+    //     v = v + hdr.offset.vaddr_1;
+    // }
+
+    Hash<bit<32>>(HashAlgorithm_t.IDENTITY) copy1;
+    Hash<bit<32>>(HashAlgorithm_t.IDENTITY) copy2;
+
+    // action assign_offset() {
+    //     hdr.bth.packet_seqnum = p;
+    //     hdr.reth.virtual_addr = v;
+    //     // hdr.bth.packet_seqnum  = copy1.get({p});
+    //     // hdr.reth.virtual_addr  = copy2.get({v});
+    // }
+    
     apply {
         if(hdr.udp.dst_port == 4791 && eg_intr_md.egress_port != 60) {
             mirror();
         }
 
         if(hdr.reth.isValid() && eg_intr_md.egress_port != 60) {
+            // poff = hdr.offset.psn;
+            // voff = hdr.offset.vaddr;
+            
+
+            @stage(1){
             rdma_translate.apply();
             swap_dst_mac_ip.apply();
-        }
-        
-        @stage(4){
-            if(hdr.reth.isValid() && eg_intr_md.egress_port != 60) {
-                calculate_crc();
-                swap_crc();
-                swap2_crc();
-                swap3_crc();
-                swap4_crc();
+            }
+
+            @stage(2){
+            // if(hdr.offset.isValid()){
+            //     add_offset();
+            // }
+             p = p + hdr.offset.psn;
+             hdr.bth.packet_seqnum  = copy1.get({p})[23:0];
+            
+            }
+
+            @stage(3){
+            // assign_offset();
+            // hdr.bth.packet_seqnum = p;
+            // hdr.reth.virtual_addr = v;
+            v = v + hdr.offset.vaddr;
+            hdr.reth.virtual_addr_1  = copy2.get({v});
+            }
+
+
+            @stage(4){
+            calculate_crc();
+            swap_crc();
+            swap2_crc();
+            swap3_crc();
+            swap4_crc();
             }
         }
-
         
+        // @stage(4){
+        //     if(hdr.reth.isValid() && eg_intr_md.egress_port != 60) {
+        //         calculate_crc();
+        //         swap_crc();
+        //         swap2_crc();
+        //         swap3_crc();
+        //         swap4_crc();
+        //     }
+        // }
 
+        @stage(5){
+        hdr.bridge.setInvalid();
+        hdr.offset.setInvalid();
+        }
         // if(hdr.reth.isValid()) {
         //     calculate_crc();
         //     swap_crc();
@@ -532,15 +652,6 @@ control Egress(
         //     swap3_crc();
         //     swap4_crc();
         // }
-
-        // if(eg_intr_md.egress_port == 132) {
-        //     eg_dprsr_md.mirror_type = 1;
-        //     meta.mirror_session = 10w333;
-        // } else if (eg_intr_md.egress_port == 134) {
-        //     eg_dprsr_md.mirror_type = 1;
-        //     meta.mirror_session = 10w333;
-        // }
-        
     }
 }
 
@@ -575,7 +686,14 @@ control EgressDeparser(packet_out pkt,
         if(eg_dprsr_md.mirror_type == 1) {
             mirror.emit(meta.mirror_session);
         }
-        pkt.emit(hdr);
+
+        pkt.emit(hdr.ethernet);
+        pkt.emit(hdr.ipv4);
+        pkt.emit(hdr.udp);
+        pkt.emit(hdr.bth);
+        pkt.emit(hdr.reth);
+        pkt.emit(hdr.data);
+        pkt.emit(hdr.icrc);
     }
 }
 
