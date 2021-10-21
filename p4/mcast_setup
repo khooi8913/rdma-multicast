@@ -1,0 +1,11 @@
+bfrt.mirror.cfg.entry_with_normal(sid=333, direction='BOTH', session_enable=True, ucast_egress_port=60, ucast_egress_port_valid=True, max_pkt_len=16384).push()
+bfrt.pre.node.entry(224, 224, [], [133, 134, 135]).push()
+bfrt.pre.mgid.entry(224, [224], [False], [0]).push()
+bfrt.mirror.cfg.dump()
+bfrt.pre.node.dump()
+bfrt.pre.mgid.dump()
+
+# bfrt.rdma_icrc.pipe.Egress.rdma_translate.entry_with_translate(egress_port=133, dst_addr="10.10.10.255", qp=0x18b, remote_key=346442, seq=9776155, virtual_addr=94909648333584).push()
+# bfrt.rdma_icrc.pipe.Egress.rdma_translate.entry_with_translate(egress_port=134, dst_addr="10.10.10.255", qp=0xa9, remote_key=474139, seq=12927059, virtual_addr=94325430881040).push()
+# bfrt.rdma_icrc.pipe.Egress.rdma_translate.entry_with_translate(egress_port=135, dst_addr="10.10.10.255", qp=0x190, remote_key=407608, seq=13910399, virtual_addr=94838039792400).push()
+# bfrt.rdma_icrc.pipe.Egress.rdma_translate.dump()
