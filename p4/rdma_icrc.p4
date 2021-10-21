@@ -581,6 +581,7 @@ control Egress(
 
     Hash<bit<32>>(HashAlgorithm_t.IDENTITY) copy1;
     Hash<bit<32>>(HashAlgorithm_t.IDENTITY) copy2;
+    Hash<bit<32>>(HashAlgorithm_t.IDENTITY) copy3;
 
     // action assign_offset() {
     //     hdr.bth.packet_seqnum = p;
@@ -618,6 +619,7 @@ control Egress(
             // hdr.bth.packet_seqnum = p;
             // hdr.reth.virtual_addr = v;
             v = v + hdr.offset.vaddr;
+            hdr.reth.virtual_addr_0 = copy3.get({v0});
             hdr.reth.virtual_addr_1  = copy2.get({v});
             }
 
