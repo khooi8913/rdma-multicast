@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <time.h>
 
-static const int RDMA_BUFFER_SIZE = 16;
+static const int RDMA_BUFFER_SIZE = 32;
 
 struct message {
   enum {
