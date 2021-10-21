@@ -1,0 +1,5 @@
+bfrt.rdma_icrc.pipe.Egress.rdma_translate.clear()
+bfrt.rdma_icrc.pipe.Egress.rdma_translate.dump()
+
+bfrt.rdma_icrc.pipe.Egress.psn_offset.clear()
+bfrt.rdma_icrc.pipe.Egress.vaddr_offset.clear()
