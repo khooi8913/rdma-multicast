@@ -6,9 +6,6 @@
 /*************************************************************************
  ************* C O N S T A N T S    A N D   T Y P E S  *******************
 **************************************************************************/
-typedef bit<8> header_type_t;
-
-
 typedef bit<16> ether_type_t;
 typedef bit<8> ip_protocol_t;
 
@@ -22,14 +19,6 @@ const bit<16> UDP_ROCE_V2 = 4791;
 
 /*  Define all the headers the program will recognize             */
 /*  The actual sets of headers processed by each gress can differ */
-header bridge_h {
-    header_type_t header_type;
-}
-
-header offset_h {
-    bit<32> psn;
-    bit<32> vaddr;
-}
 
 /* Standard ethernet header */
 header ethernet_h {
@@ -95,8 +84,6 @@ header icrc_h {
     /***********************  H E A D E R S  ************************/
 
 struct my_ingress_headers_t {
-    bridge_h        bridge;
-    offset_h        offset;
     ethernet_h      ethernet;
     ipv4_h          ipv4;
     udp_h           udp;
@@ -190,25 +177,7 @@ control Ingress(
     inout ingress_intrinsic_metadata_for_deparser_t  ig_dprsr_md,
     inout ingress_intrinsic_metadata_for_tm_t        ig_tm_md)
 {
-    bit<32> poff = 0;
-    bit<32> voff = 0;
-
-    Register<bit<32>, _>(1) psn_offset;
-    RegisterAction<bit<32>, _, bit<32>> (psn_offset) psn_offset_update = {
-        void apply(inout bit<32> val, out bit<32> rv) {
-            rv = val;
-            val = val + 1;
-        }
-    };
-
-    Register<bit<32>, _>(1) vaddr_offset;
-    RegisterAction<bit<32>, _, bit<32>> (vaddr_offset) vaddr_offset_update = {
-        void apply(inout bit<32> val, out bit<32> rv) {
-            rv = val;
-            val = val + hdr.reth.dma_length;
-        }
-    };
-
+   
     action mirror() {
         ig_dprsr_md.mirror_type = 1;
         meta.mirror_session = 10w333;
@@ -260,22 +229,9 @@ control Ingress(
     }
 
     apply {
-        if(multicast_forward.apply().hit) {
-            poff = psn_offset_update.execute(0);
-            voff = vaddr_offset_update.execute(0);
-            hdr.bridge.setValid();
-            hdr.bridge.header_type = 0xA;
-        } else {
+        if(!multicast_forward.apply().hit) {
             l2_forwarding.apply();
-            hdr.bridge.setValid();
-            hdr.bridge.header_type = 0x0;
-        }
-
-        if(hdr.bridge.header_type == 0xA) {
-            hdr.offset.setValid();
-            hdr.offset.psn = poff;
-            hdr.offset.vaddr = voff;
-        }
+        } 
 
         // if(ig_intr_md.ingress_port == 132) {
         //     ig_dprsr_md.mirror_type = 1;
@@ -321,8 +277,6 @@ control IngressDeparser(packet_out pkt,
     /***********************  H E A D E R S  ************************/
 
 struct my_egress_headers_t {
-    bridge_h        bridge;
-    offset_h        offset;
     ethernet_h      ethernet;
     ipv4_h          ipv4;
     udp_h           udp;
@@ -355,18 +309,6 @@ parser EgressParser(packet_in        pkt,
         meta.checksum_upd_ipv4 = false;
 
         pkt.extract(eg_intr_md);
-        pkt.extract(hdr.bridge);
-
-        transition select(hdr.bridge.header_type) {
-            0xA : parse_offset;
-            default : parse_ethernet;
-        }
-
-        // transition parse_ethernet;
-    }
-
-    state parse_offset {
-        pkt.extract(hdr.offset);
         transition parse_ethernet;
     }
 
@@ -437,12 +379,28 @@ control Egress(
     bit<32> tmp4 = 0; 
     bit<64> tmp5 = 0;
 
-    bit<32> poff = 0;
-    bit<32> voff = 0;
-
     bit<32> p = 0;
     bit<32> v0 = 0;
     bit<32> v = 0;
+
+    bit<32> poff = 0;
+    bit<32> voff = 0;
+
+    Register<bit<32>, bit<9>>(512) psn_offset;
+    RegisterAction<bit<32>, bit<9>, bit<32>> (psn_offset) psn_offset_update = {
+        void apply(inout bit<32> val, out bit<32> rv) {
+            rv = val;
+            val = val + 1;
+        }
+    };
+
+    Register<bit<32>, bit<9>>(512) vaddr_offset;
+    RegisterAction<bit<32>, bit<9>, bit<32>> (vaddr_offset) vaddr_offset_update = {
+        void apply(inout bit<32> val, out bit<32> rv) {
+            rv = val;
+            val = val + hdr.reth.dma_length;
+        }
+    };
 
     CRCPolynomial<bit<32>>(
         coeff = 0x04C11DB7,
@@ -596,20 +554,17 @@ control Egress(
         }
 
         if(hdr.reth.isValid() && eg_intr_md.egress_port != 60) {
-            // poff = hdr.offset.psn;
-            // voff = hdr.offset.vaddr;
-            
+            poff = psn_offset_update.execute(eg_intr_md.egress_port);
+            voff = vaddr_offset_update.execute(eg_intr_md.egress_port);
 
-            @stage(1){
             rdma_translate.apply();
             swap_dst_mac_ip.apply();
-            }
 
             @stage(2){
             // if(hdr.offset.isValid()){
             //     add_offset();
             // }
-             p = p + hdr.offset.psn;
+             p = p + poff;
              hdr.bth.packet_seqnum  = copy1.get({p})[23:0];
             
             }
@@ -618,7 +573,7 @@ control Egress(
             // assign_offset();
             // hdr.bth.packet_seqnum = p;
             // hdr.reth.virtual_addr = v;
-            v = v + hdr.offset.vaddr;
+            v = v + voff;
             hdr.reth.virtual_addr_0 = copy3.get({v0});
             hdr.reth.virtual_addr_1  = copy2.get({v});
             }
@@ -643,10 +598,6 @@ control Egress(
         //     }
         // }
 
-        @stage(5){
-        hdr.bridge.setInvalid();
-        hdr.offset.setInvalid();
-        }
         // if(hdr.reth.isValid()) {
         //     calculate_crc();
         //     swap_crc();
@@ -686,16 +637,10 @@ control EgressDeparser(packet_out pkt,
         }
 
         if(eg_dprsr_md.mirror_type == 1) {
-            mirror.emit(meta.mirror_session);
+            mirror.emit<>(meta.mirror_session);
         }
 
-        pkt.emit(hdr.ethernet);
-        pkt.emit(hdr.ipv4);
-        pkt.emit(hdr.udp);
-        pkt.emit(hdr.bth);
-        pkt.emit(hdr.reth);
-        pkt.emit(hdr.data);
-        pkt.emit(hdr.icrc);
+        pkt.emit(hdr);
     }
 }
 

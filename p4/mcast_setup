@@ -1,5 +1,9 @@
+# bfrt.mirror.cfg.entry_with_normal(sid=333, direction='BOTH', session_enable=True, ucast_egress_port=133, ucast_egress_port_valid=True, max_pkt_len=16384).push()
+# bfrt.pre.node.entry(224, 224, [], [134, 135]).push()
+
 bfrt.mirror.cfg.entry_with_normal(sid=333, direction='BOTH', session_enable=True, ucast_egress_port=60, ucast_egress_port_valid=True, max_pkt_len=16384).push()
 bfrt.pre.node.entry(224, 224, [], [133, 134, 135]).push()
+
 bfrt.pre.mgid.entry(224, [224], [False], [0]).push()
 bfrt.mirror.cfg.dump()
 bfrt.pre.node.dump()
