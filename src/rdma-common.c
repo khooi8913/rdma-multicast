@@ -1,6 +1,8 @@
 #include "rdma-common.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
+#include <stdint.h>
 
 static const int RDMA_BUFFER_SIZE = 32;
 
@@ -260,6 +262,18 @@ void on_completion(struct ibv_wc *wc)
     // TEST_NZ(ibv_post_send(conn->qp, &wr, &bad_wr));
     printf("=== RDMA done ===\n");
     printf("get_peer_message_region: %s\n", get_peer_message_region(conn));
+    char* ptr_rdma_memory = get_peer_message_region(conn); // size = RDMA_BUFFER_SIZE
+    
+    FILE *fp = fopen("test.txt", "w");
+    if(fp==NULL) {
+        printf("An error occoured!");
+        exit(1);
+    }
+    for (size_t i = 0; i < (size_t)(RDMA_BUFFER_SIZE / 4); i++) {
+      fprintf(fp, "%d", *(uint32_t*)(ptr_rdma_memory + 4 * i));
+    }
+    fclose(fp);
+    
 
     conn->send_msg->type = MSG_DONE;
     
