@@ -70,6 +70,7 @@ header ib_reth_h {
 
 header data_h {
     bit<128> data; 
+    // bit<512> data; // max 64B payload
 }
 
 header icrc_h {
