@@ -24,6 +24,10 @@ numpages = {4}
 }
 ```
 
+## Others
+
+The RDMA iCRC computation is referred from this [repository](https://github.com/rutgerbeltman/telemetry-rdma-p4-switch/).
+
 ## Feedback/ Questions
 We welcome questions/ comments/ feedback/ collaborations.
 
