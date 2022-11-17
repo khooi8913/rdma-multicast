@@ -1,6 +1,6 @@
 # One-sided RDMA Multicast
 
-This repository holds the Tofino implementation to perform one-sided RDMA multicast, proposed in the [paper](https://dl.acm.org/doi/abs/10.1145/3493425.3502766), `Towards a Framework for One-sided RDMA Multicast` accepted at the EuroP4'21 Workshop and published at ANCS'21.
+This repository holds the Tofino prototype implementation to perform one-sided RDMA multicast, proposed in the [paper](https://dl.acm.org/doi/abs/10.1145/3493425.3502766), `Towards a Framework for One-sided RDMA Multicast` accepted at the EuroP4'21 Workshop and published at ANCS'21.
 
 ## Usage
 
